@@ -2,9 +2,9 @@ noinst_LTLIBRARIES = libjobs.la
 
 libjobs_la_SOURCES = \
 	CommFIFO.cpp JobsList.cpp GMJob.cpp JobDescriptionHandler.cpp \
-	ContinuationPlugins.cpp DTRGenerator.cpp \
+	ContinuationPlugins.cpp DTRGenerator.cpp JobGroup.cpp \
 	CommFIFO.h   JobsList.h   GMJob.h   JobDescriptionHandler.h   \
-	ContinuationPlugins.h   DTRGenerator.h
+	ContinuationPlugins.h   DTRGenerator.h   JobGroup.h
 libjobs_la_CXXFLAGS = -I$(top_srcdir)/include \
 	$(LIBXML2_CFLAGS) $(GLIBMM_CFLAGS) $(OPENSSL_CFLAGS) $(AM_CXXFLAGS)
 libjobs_la_LIBADD = \

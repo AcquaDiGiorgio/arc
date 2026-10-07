@@ -2,6 +2,7 @@
 #include <config.h>
 #endif
 
+#include <algorithm>
 #include <iostream>
 #include <pwd.h>
 
@@ -17,6 +18,7 @@
 #include "../log/HeartBeatMetrics.h"
 #include "../log/SpaceMetrics.h"
 #include "../jobs/JobsList.h"
+#include "../jobs/JobGroup.h"
 
 #include "CacheConfig.h"
 #include "GMConfig.h"
@@ -118,6 +120,8 @@ bool CoreConfig::ParseConfINI(GMConfig& config, Arc::ConfigFile& cfile) {
   cf.AddSection("lrms/ssh");
   static const int lrms_secnum        = 12;
   cf.AddSection("lrms");
+  static const int grouping_secnum    = 13;
+  cf.AddSection("grouping");
 
   if (config.job_perf_log) {
     config.job_perf_log->SetEnabled(false);
@@ -660,6 +664,100 @@ bool CoreConfig::ParseConfINI(GMConfig& config, Arc::ConfigFile& cfile) {
     if (cf.SectionNum() == ssh_secnum) { // ssh
       if (cf.SubSection()[0] == '\0') {
         config.sshfs_mounts_enabled = true;
+      }
+      continue;
+    }
+    if (cf.SectionNum() == grouping_secnum) { // grouping
+      if (cf.SubSection()[0] == '\0') {
+        if (cf.SectionNew()) {
+          std::string name = cf.SectionIdentifier();
+          if (name.empty()) {
+            logger.msg(Arc::ERROR, "No grouping name given in grouping block name"); return false;
+          }
+          config.job_groups[name] = IFIC::GroupConfig();
+        }
+        else{
+          if (config.job_groups.empty())
+            continue;
+
+          std::pair<const std::string, IFIC::GroupConfig> group_pair = *(--config.job_groups.end());
+          std::string group_name = group_pair.first;
+
+          if (command == "group_by") {
+            std::string str = rest;
+            if (str.empty()) {
+              logger.msg(Arc::ERROR, "group_by parameter is empty"); return false;
+            }
+            config.job_groups[group_name].by = str;
+          }
+          else if (command == "max_jobs") {
+            std::string str = rest;
+            if (str.empty()) {
+              logger.msg(Arc::ERROR, "max_jobs parameter is empty"); return false;
+            }
+            config.job_groups[group_name].max_jobs = stoi(str);
+          }
+          else if (command == "max_seconds") {
+            std::string str = rest;
+            if (str.empty()) {
+              logger.msg(Arc::ERROR, "max_seconds parameter is empty"); return false;
+            }
+            config.job_groups[group_name].max_seconds = (long)stoi(str);
+          }
+          else if (command == "condition") {
+            std::string str = rest;
+            if (str.empty()) {
+              logger.msg(Arc::ERROR, "condition parameter is empty"); return false;
+            }
+            config.job_groups[group_name].condition = str;
+          }
+          else if (command == "check_value") {
+            std::string str = rest;
+            if (str.empty()) {
+              logger.msg(Arc::ERROR, "check value parameter is empty"); return false;
+            }
+            config.job_groups[group_name].check_value = str;
+          }
+          // else if (command == "group_exec") {
+          //   std::string str = rest;
+          //   if (str.empty()) {
+          //     logger.msg(Arc::ERROR, "executable parameter is empty"); return false;
+          //   }
+          //   config.job_groups[group_name].group_exec = str;
+          // }
+          else if (command == "dry_run") {
+            std::string str = rest;
+            if (str.empty()) {
+              logger.msg(Arc::ERROR, "dry run parameter is empty"); return false;
+            }
+              
+            std::transform(
+              str.begin(), 
+              str.end(), 
+              str.begin(), 
+              [](unsigned char c){ return std::tolower(c); }
+            );
+
+            if (str == "y" || str == "yes" || str == "true")
+              config.job_groups[group_name].dry_run = true;
+          }
+          else if (command == "sender_dn") {
+            std::string str = rest;
+            if (str.empty()) {
+              logger.msg(Arc::ERROR, "Sender DN parameter is empty"); return false;
+            }
+
+            config.job_groups[group_name].senderDn = str;
+          }
+          else if (command == "sender_pem") {
+            std::string str = rest;
+            if (str.empty()) {
+              logger.msg(Arc::ERROR, "Sender PEM parameter is empty"); return false;
+            }
+
+            config.job_groups[group_name].senderPEMLocation = str;
+          }
+        }
       }
       continue;
     }

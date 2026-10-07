@@ -18,6 +18,7 @@ class Validator(object):
                         "arex/jura/sgas",
                         "arex/jura/apel",
                         "queue",
+                        "grouping",
                         "custom"]
 
     # Mandatory blocks

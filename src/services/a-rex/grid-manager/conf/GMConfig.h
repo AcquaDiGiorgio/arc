@@ -8,6 +8,8 @@
 #include <arc/Run.h>
 #include <arc/User.h>
 
+#include "../jobs/JobGroup.h"
+
 #include "CacheConfig.h"
 
 namespace ARex {
@@ -264,6 +266,10 @@ public:
   const std::list<std::pair<bool,std::string> > & MatchingGroupsPublicInformation() const;
   /// Returns configured scopes for specified action.
   const std::list<std::string> & TokenScopes(const char* action) const;
+  ///
+  const IFIC::GroupConfig* JobGroups(std::string groupName) const;
+  ///
+  const std::list<std::string> JobGroupNames() const;
 
   bool UseSSH() const { return sshfs_mounts_enabled; }
   /// Check if remote directory is mounted
@@ -379,7 +385,11 @@ private:
   /// groups allowed to access public information with allow/deny mark (true/false)
   std::list<std::pair<bool, std::string> > matching_groups_publicinfo;
   std::map<std::string, std::list<std::string> > token_scopes;
-
+  // Conditions for group matching
+  std::map<std::string, IFIC::GroupConfig> job_groups;
+  //
+  std::list<std::string> job_group_names;
+  
   /// Indicates whether session, runtime and cache dirs are mounted through sshfs (only suppored by Python backends) 
   bool sshfs_mounts_enabled;
 

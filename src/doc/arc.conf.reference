@@ -2381,6 +2381,46 @@ maxcachedconnections=0
 ##
 ### end of the [datadelivery-service] block ##############
 
+### The [grouping:name] block ###############################
+## Explain
+##
+#[grouping:groupname]
+
+## group_by = string - .
+## default: undefined
+#group_by=queue
+
+## condition = string - .
+## default: undefined
+#condition=eq
+
+## max_jobs = number - .
+## default: undefined
+#max_jobs=50
+
+## max_seconds = number - .
+## default: 120
+#max_seconds=120
+
+## check_value = string - .
+## default: undefined
+#check_value=main
+
+## dry_run = yes/no - .
+## default: no
+#dry_run=no
+
+## sender_dn = /user/dn - .
+## default: undefined
+#sender_dn=location
+
+## sender_pem = /home/user/.globus/cert.pem - .
+## default: /root/.globus/cert.pem
+#sender_pem=/root/.globus/cert.pem
+##
+##
+### end of the [grouping:name] block ##############
+
 
 ### The [custom:name] block ###################################################
 ## This optional block is for those who wish to include non-ARC configuration

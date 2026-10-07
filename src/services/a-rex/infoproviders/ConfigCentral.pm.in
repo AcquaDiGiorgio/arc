@@ -903,7 +903,8 @@ sub set_defaults {
                       'infosys/glue2',
                       'infosys/glue2/ldap',
                       'infosys/ldap',
-                      'infosys/nordugrid'
+                      'infosys/nordugrid',
+                      'grouping'
                       );
 
     ## Fix for Perl problem with nested hashes: add an enabled item to all blocks that can be enabled and add 0 or 1 values

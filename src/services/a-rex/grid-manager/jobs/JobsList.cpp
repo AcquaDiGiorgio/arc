@@ -206,7 +206,12 @@ bool JobsList::AddJob(const JobId &id,uid_t uid,gid_t gid,job_state_t state,cons
     logger.msg(Arc::ERROR, "%s: unexpected job add request: %s", i->job_id, reason?reason:"");
   } else {
     jobs[id] = i;
-    RequestAttention(i);
+
+    // If the job can be added, group it and drop the base job
+    if(! IFIC::JobGroups::tryAddJob(this, i, config))
+      RequestAttention(i);
+    else
+      DropJob(i, state, false);
   }
   return true;
 }
