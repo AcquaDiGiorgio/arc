@@ -22,7 +22,7 @@ __blocks_order = ['common', 'authgroup', 'mapping', 'lrms', 'arex', 'arex/cache'
                   'arex/jura', 'arex/jura/sgas', 'arex/jura/apel', 'arex/ganglia',
                   'infosys', 'infosys/ldap', 'infosys/nordugrid', 'infosys/glue2',
                   'infosys/glue2/ldap', 'infosys/cluster', 'queue',
-                  'datadelivery-service', 'custom'
+                  'datadelivery-service', 'grouping', 'custom'
                   ]
 
 # processing constants and regexes

@@ -1,0 +1,9 @@
+&(executable=runhello.sh)
+(jobname=hello_autodeploy)
+(stdout=std.out)
+(stderr=std.err)
+(cpuTime="1 hours")
+(memory="1000")
+(inputfiles=
+("localfile.txt" "file.txt" ))
+(outputfiles=("output.txt" "" ))
