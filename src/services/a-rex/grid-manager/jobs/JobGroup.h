@@ -10,6 +10,8 @@
 
 #include <arc/Logger.h>
 
+#include "../files/ControlFileHandling.h"
+
 #include "GMJob.h"
 
 
@@ -63,20 +65,37 @@ public:
     };
 };
 
-// TODO: Use for grouping
 class GroupedJob {
 public:
-    std::string id;
-    std::list<std::string> RTEs;
     fs::path controlDir;
     fs::path workDir;
-    std::list<std::string> inputs;
-    std::list<std::string> outputs;
+
     std::list<std::string> requiredInputNames;
-    bool hasEveryInput;
+    std::list<std::string> outputs;
+    std::list<std::string> RTEs;
+    std::list<std::string> envs;
+    
+    
+    bool inputsMoved;
+    bool requirementsProcessed;
+    
+    ARex::GMJobRef& jobRef;
+
+    GroupedJob(ARex::GMJobRef& jobRef, std::string jobControlDir) : 
+        jobRef(jobRef), 
+        controlDir(fs::path(jobControlDir)), 
+        workDir(jobRef->SessionDir()),
+        inputsMoved(false),
+        requirementsProcessed(false)
+        {};
+
+    bool AreInputsReady(const ARex::GMConfig& config);
+    void MoveInputs(const std::string& newLocation, bool copyInstread=true);
+
+    bool operator==(GroupedJob other){ return jobRef->get_id() == other.jobRef->get_id(); }
 };
 
-class JobGroup : public std::list<ARex::GMJobRef> {
+class JobGroup : public std::list<GroupedJob> {
 public:
     enum class GroupState{
         STORED, FAILED, READY
@@ -103,10 +122,10 @@ private:
 
 
 public:
-    void sendGroup(ARex::JobsList* jobs, const ARex::GMConfig& config);
+    void SendGroup(ARex::JobsList* jobs, const ARex::GMConfig& config);
     void SendExec(const ARex::GMConfig& config);
 
-    GroupState addToGroup(ARex::GMJobRef& jobRef);
+    GroupState addToGroup(ARex::GMJobRef& jobRef, const ARex::GMConfig& config);
 
     JobGroup(std::string name, const IFIC::GroupConfig config);
 
