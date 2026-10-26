@@ -42,6 +42,7 @@ COPY ./configure_arc.sh                 /arc/configure.sh
 
 RUN chmod u+x ./compile.sh
 RUN chmod u+x ./configure.sh
+RUN chmod u+x ./run_group.sh
 
 COPY ./build/nordugrid-arc-7.1.2.tar.gz /arc/build/nordugrid-arc-7.1.2.tar.gz
 RUN ./compile.sh

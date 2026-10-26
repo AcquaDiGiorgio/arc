@@ -49,6 +49,8 @@ identity=$(arcproxy -I | grep Identity | cut -d " " -f 2-)
 sed -i "s|sender_dn =|sender_dn = ${identity}|" /etc/arc.conf
 sed -i "s|dry_run = yes|dry_run = false|" /etc/arc.conf
 
+touch /arc/GROUPED
+
 echo Launching servers
 /usr/share/arc/arc-arex-start
 /usr/share/arc/arc-arex-ws-start

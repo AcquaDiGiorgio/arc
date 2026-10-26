@@ -4,7 +4,6 @@
 #include <ctime>
 #include <map>
 #include <list>
-#include <mutex>
 #include <strings.h>
 #include <filesystem>
 
@@ -13,7 +12,6 @@
 #include "../files/ControlFileHandling.h"
 
 #include "GMJob.h"
-
 
 namespace fs = std::filesystem;
 
@@ -43,7 +41,7 @@ private:
     std::string check_value;
 
 public:
-    JLDChecker(std::string _by, std::string _condition, std::string _check_value): 
+    JLDChecker(const std::string _by, const std::string _condition, const std::string _check_value): 
         by(_by), condition(_condition), check_value(_check_value) {};
 
     bool isValid(const ARex::JobLocalDescription& jobRef);
@@ -74,25 +72,33 @@ public:
     std::list<std::string> outputs;
     std::list<std::string> RTEs;
     std::list<std::string> envs;
-    
-    
+
     bool inputsMoved;
     bool requirementsProcessed;
-    
-    ARex::GMJobRef& jobRef;
 
-    GroupedJob(ARex::GMJobRef& jobRef, std::string jobControlDir) : 
-        jobRef(jobRef), 
+    // From GMJobRef
+    std::string id;
+    ARex::JobLocalDescription jld;
+    Arc::User user;
+
+    std::string stdout_;
+    std::string stderr_;
+
+
+    GroupedJob(ARex::GMJobRef& jobRef, const std::string jobControlDir) :
+        id(jobRef->get_id()),
+        jld(*jobRef->GetLocalDescription()),
+        user(jobRef->get_user()),
         controlDir(fs::path(jobControlDir)), 
         workDir(jobRef->SessionDir()),
         inputsMoved(false),
         requirementsProcessed(false)
         {};
 
-    bool AreInputsReady(const ARex::GMConfig& config);
+    bool AreInputsReady();
     void MoveInputs(const std::string& newLocation, bool copyInstread=true);
 
-    bool operator==(GroupedJob other){ return jobRef->get_id() == other.jobRef->get_id(); }
+    bool operator==(GroupedJob other){ return id == other.id; }
 };
 
 class JobGroup : public std::list<GroupedJob> {
@@ -120,16 +126,17 @@ private:
     ARex::GMJob buildGrouppedJob(void);
     void PrepareConfigFile(void);
 
-
 public:
     void SendGroup(ARex::JobsList* jobs, const ARex::GMConfig& config);
     void SendExec(const ARex::GMConfig& config);
 
-    GroupState addToGroup(ARex::GMJobRef& jobRef, const ARex::GMConfig& config);
+    GroupState addToGroup(ARex::GMJobRef& jobRef, const std::string controlDir);
 
-    JobGroup(std::string name, const IFIC::GroupConfig config);
+    JobGroup(const std::string name, const IFIC::GroupConfig config);
 
     ARex::JobId getId(){return id;};
+
+    void Reset();
 };
 
 class JobGroups {
@@ -138,10 +145,13 @@ class JobGroups {
 
 private:
     static std::map<std::string, std::unique_ptr<JobGroup>> groups;
-    static void addToGroup(const std::string& groupName, ARex::GMJobRef& jobRef, const ARex::GMConfig& config);
+    static std::map<std::string, std::string> sentJobsToGroupId;
+
     static void buildGroups(const ARex::GMConfig& config);
-    static std::mutex _lock;
-    
+    static std::string CheckSentBy(const std::string jobId);
+    static bool HasOutput(const std::string jobId, const std::string groupId);
+    static void ReturnOutputs(const std::string jobId, const std::string groupId);
+
 public:
     static bool tryAddJob(ARex::JobsList* jobList, ARex::GMJobRef& jobRef, const ARex::GMConfig& config);
 };
@@ -149,4 +159,4 @@ public:
 
 } // namespace IFIC
 
-#endif
+#endif //__GROUPING_GM_JOB_GROUP_H__

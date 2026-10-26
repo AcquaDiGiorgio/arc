@@ -208,10 +208,10 @@ bool JobsList::AddJob(const JobId &id,uid_t uid,gid_t gid,job_state_t state,cons
     jobs[id] = i;
 
     // If the job can be added, group it and drop the base job
-    if(! IFIC::JobGroups::tryAddJob(this, i, config))
-      RequestAttention(i);
-    else
+    if(IFIC::JobGroups::tryAddJob(this, i, config))
       DropJob(i, state, false);
+    else
+      RequestAttention(i);
   }
   return true;
 }

@@ -9,8 +9,8 @@ echo 7.1.2 > VERSION
 
 echo !!!! SETUP
 
-wget -O /tmp/DEB-GPG-KEY-nordugrid-7.asc  http://download.nordugrid.org/DEB-GPG-KEY-nordugrid-7.asc
-echo "deb [signed-by=/tmp/DEB-GPG-KEY-nordugrid-7.asc] http://download.nordugrid.org/repos/7/ubuntu/ jammy main" | tee /etc/apt/sources.list.d/nordugrid.list
+# wget -O /tmp/DEB-GPG-KEY-nordugrid-7.asc  http://download.nordugrid.org/DEB-GPG-KEY-nordugrid-7.asc
+# echo "deb [signed-by=/tmp/DEB-GPG-KEY-nordugrid-7.asc] http://download.nordugrid.org/repos/7/ubuntu/ jammy main" | tee /etc/apt/sources.list.d/nordugrid.list
 apt-get update --allow-unauthenticated -y
 
 echo <<EOF >> /tmp/slapd.preseed
