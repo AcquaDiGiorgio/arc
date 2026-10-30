@@ -3,14 +3,16 @@
 #include <exception>
 #include <fstream>
 #include <list>
-#include <ostream>
 #include <regex>
-#include <sigc++/functors/functor_trait.h>
+#include <stdexcept>
 #include <string>
 #include <sys/stat.h>
 #include <filesystem>
+#include <sys/wait.h> 
+#include <unistd.h> 
 
 #include <arc/GUID.h>
+
 #include "GMJob.h"
 #include "JobsList.h"
 
@@ -29,6 +31,10 @@ namespace IFIC {
 
 std::map<std::string, std::unique_ptr<JobGroup>> JobGroups::groups = std::map<std::string, std::unique_ptr<JobGroup>>();
 std::map<std::string, std::string> JobGroups::sentJobsToGroupId = std::map<std::string, std::string>();
+std::list<std::string> JobGroups::finishedJobs = std::list<std::string>(); 
+std::mutex JobGroups::sentJobs_lock = std::mutex();
+std::mutex JobGroups::finishedJobs_lock = std::mutex();
+
 static Arc::Logger logger = Arc::Logger(Arc::Logger::getRootLogger(), "IFIC.JobGrouping", Arc::DEBUG);
 
 //
@@ -262,7 +268,6 @@ bool IsGroupedInGrami(const std::string controlDir){
     return false;
 };
 
-
 //
 // JLDChecker
 //
@@ -295,58 +300,6 @@ bool JLDChecker::isValid(const ARex::JobLocalDescription& jobRef){
 // GroupedJob
 //
 bool GroupedJob::AreInputsReady(){
-    // Check control dir of job to populate the requirments
-    if (!this->requirementsProcessed){
-        logger.msg(Arc::DEBUG, "Processing grami file at %s", this->controlDir.generic_string());
-
-        fs::path grami = fs::path(this->controlDir).append("grami");
-
-        std::ifstream gramiStream(grami);
-
-        std::stringstream gramiBuffer;
-        gramiBuffer << gramiStream.rdbuf();
-        std::string gramiContent = gramiBuffer.str();
-
-        gramiStream.close();
-
-        std::list<std::string> requiredInputNames_  = CutRegex(
-            CheckRegex(gramiContent, "joboption_inputfile_[0-9]+='.*'"),
-            '=', 1, 1);
-
-        for(std::string input : requiredInputNames_)
-            requiredInputNames.push_back(fs::path(input).filename().generic_string());
-
-        outputs = CutRegex(
-            CheckRegex(gramiContent, "joboption_outputfile_[0-9]+='.*'"), 
-            '=', 1, 1);
-        envs    = CutRegex(
-            CheckRegex(gramiContent, "joboption_env_[0-9]+='.*'"), 
-            '=', 1, 1);
-        RTEs    = CutRegex(
-            CheckRegex(gramiContent, "joboption_runtime_[0-9]+(_[0-9]+)?='.*'"), 
-            '=', 1, 1);
-
-        this->requirementsProcessed = true;
-
-        logger.msg(Arc::DEBUG, "Final info:");
-        logger.msg(Arc::DEBUG, "Required Input Names: %s",
-            printList<std::string>(
-                requiredInputNames,
-                [] (const std::string& c) -> const std::string& { return c; }));
-        logger.msg(Arc::DEBUG, "Outputs: %s",
-            printList<std::string>(
-                outputs,
-                [] (const std::string& c) -> const std::string& { return c; }));
-        logger.msg(Arc::DEBUG, "Envs: %s",
-            printList<std::string>(
-                envs,
-                [] (const std::string& c) -> const std::string& { return c; }));
-        logger.msg(Arc::DEBUG, "RTEs: %s",
-            printList<std::string>(
-                RTEs,
-                [] (const std::string& c) -> const std::string& { return c; }));
-    }
-    
     logger.msg(Arc::DEBUG, "Checking input files at workdir %s", this->workDir.generic_string());
 
     std::list<std::string> files;
@@ -397,6 +350,71 @@ bool GroupedJob::AreInputsReady(){
     return true;
 };
 
+void GroupedJob::ProcessGrami(){
+    logger.msg(Arc::DEBUG, "Processing grami file at %s", this->controlDir.generic_string());
+
+    fs::path grami = fs::path(this->controlDir).append("grami");
+
+    std::ifstream gramiStream(grami);
+
+    std::stringstream gramiBuffer;
+    gramiBuffer << gramiStream.rdbuf();
+    std::string gramiContent = gramiBuffer.str();
+
+    gramiStream.close();
+
+    std::list<std::string> requiredInputNames_  = CutRegex(
+        CheckRegex(gramiContent, "joboption_inputfile_[0-9]+='.*'"),
+        '=', 1, 1);
+
+    for(std::string input : requiredInputNames_)
+        this->requiredInputNames.push_back(fs::path(input).filename().generic_string());
+
+    this->outputs = CutRegex(
+        CheckRegex(gramiContent, "joboption_outputfile_[0-9]+='.*'"), 
+        '=', 1, 1);
+    this->envs    = CutRegex(
+        CheckRegex(gramiContent, "joboption_env_[0-9]+='.*'"), 
+        '=', 1, 1);
+    this->RTEs    = CutRegex(
+        CheckRegex(gramiContent, "joboption_runtime_[0-9]+(_[0-9]+)?='.*'"), 
+        '=', 1, 1);
+    this->stdout_ = CutRegex(
+        CheckRegex(gramiContent, "joboption_stdout='.*'"), 
+        '=', 1, 1)
+        .front();
+    this->stderr_ = CutRegex(
+        CheckRegex(gramiContent, "joboption_stderr='.*'"), 
+        '=', 1, 1)
+        .front();
+    
+    size_t last_slash_out = this->stdout_.find_last_of('/');
+    size_t last_slash_err = this->stderr_.find_last_of('/');
+    
+    this->stdout_ = this->stdout_.substr(last_slash_out+1);
+    this->stderr_ = this->stderr_.substr(last_slash_err+1);
+
+    logger.msg(Arc::DEBUG, "Final info:");
+    logger.msg(Arc::DEBUG, "Required Input Names: %s",
+        printList<std::string>(
+            this->requiredInputNames,
+            [] (const std::string& c) -> const std::string& { return c; }));
+    logger.msg(Arc::DEBUG, "Outputs: %s",
+        printList<std::string>(
+            this->outputs,
+            [] (const std::string& c) -> const std::string& { return c; }));
+    logger.msg(Arc::DEBUG, "Envs: %s",
+        printList<std::string>(
+            this->envs,
+            [] (const std::string& c) -> const std::string& { return c; }));
+    logger.msg(Arc::DEBUG, "RTEs: %s",
+        printList<std::string>(
+            this->RTEs,
+            [] (const std::string& c) -> const std::string& { return c; }));
+    logger.msg(Arc::DEBUG, "Stdout: %s", this->stdout_);
+    logger.msg(Arc::DEBUG, "Stderr: %s", this->stderr_);
+}
+
 void GroupedJob::MoveInputs(const std::string& newDir, bool copyInstead){
     if(this->inputsMoved)
         return;
@@ -429,7 +447,7 @@ void GroupedJob::MoveInputs(const std::string& newDir, bool copyInstead){
     this->inputsMoved = ! inputsFailed;
 
     if (this->inputsMoved){
-        logger.msg(Arc::FATAL, "Creating environment");
+        logger.msg(Arc::DEBUG, "Creating environment");
         // Create env file for the job
         std::string config;
 
@@ -449,6 +467,11 @@ void GroupedJob::MoveInputs(const std::string& newDir, bool copyInstead){
             config += "\"\n";
         }
 
+        config += "STDOUT=" + stdout_ + "\n";
+        config += "STDERR=" + stderr_ + "\n";
+
+        logger.msg(Arc::DEBUG, "ENV:\n%s", config);
+        
         std::ofstream envFile(fs::path(newDir).append("env" + suffix));
         envFile << config;
         envFile.close();
@@ -631,7 +654,7 @@ void JobGroup::SendGroup(ARex::JobsList* jobList, const ARex::GMConfig& config){
     firstJobTime = std::chrono::steady_clock::time_point{};
 };
 
-void JobGroup::SendExec(const ARex::GMConfig& config){
+std::string JobGroup::SendExec(const ARex::GMConfig& config){
     // General Info
     this->PrepareConfigFile();
 
@@ -688,7 +711,7 @@ void JobGroup::SendExec(const ARex::GMConfig& config){
 
     std::string deleg_id = GetDelegationId(config, this->senderPEMLocation, this->senderDn);  
     if (deleg_id == "") 
-        return;
+        throw std::runtime_error("No delegation found");
 
     // Rest
     logger.msg(Arc::DEBUG, "> Building final info");
@@ -708,18 +731,28 @@ void JobGroup::SendExec(const ARex::GMConfig& config){
 
     logger.msg(Arc::DEBUG, "Launching execlp");
 
+    int stdfd[2];
+    char output[4096];
+    if (pipe(stdfd) == -1)
+        throw std::runtime_error("Failed to open pipe");
+
     __pid_t pid = fork();
 
     if (pid < 0)
         throw std::exception();
 
     if (pid == 0){
+        dup2 (stdfd[1], STDOUT_FILENO);
+        close(stdfd[0]);
+        close(stdfd[1]);
+
         std::string hostname = getenv("HOSTNAME");
+
         execlp(
             "arcsub", 
             "arcsub",
             "-d", 
-            "DEBUG", 
+            "FATAL", 
             "-C", 
             hostname.c_str(), 
             "-T", 
@@ -730,10 +763,24 @@ void JobGroup::SendExec(const ARex::GMConfig& config){
             NULL
         );
         logger.msg(Arc::DEBUG, "CHILD DONE");
-        return;
+        exit(0);
     }
 
-    logger.msg(Arc::DEBUG, "PARENT DONE");
+    close(stdfd[1]);
+
+    wait(NULL); // Wait for child to finish
+
+    int nbytes = read(stdfd[0], output, sizeof(output));
+
+    // Result should be something like:
+    //  Job submitted with jobid: https://{host}/arex/rest/1.0/jobs/{jobid}
+    std::string result(output);
+
+    logger.msg(Arc::DEBUG, "Result:\n%s", result);
+    
+    result.pop_back(); // remove /n
+    size_type last_slash = result.find_last_of('/');
+    return result.substr(last_slash+1);
 };
 
 JobGroup::GroupState JobGroup::addToGroup(ARex::GMJobRef& jobRef, const std::string controlDir){
@@ -796,7 +843,7 @@ JobGroup::GroupState JobGroup::addToGroup(ARex::GMJobRef& jobRef, const std::str
 //
 // JobGroups
 //
-void JobGroups::buildGroups(const ARex::GMConfig& config){
+void JobGroups::BuildGroups(const ARex::GMConfig& config){
     // Only build once
     if(!JobGroups::groups.empty())
         return;
@@ -823,9 +870,9 @@ void JobGroups::buildGroups(const ARex::GMConfig& config){
     }
 };
 
-bool JobGroups::tryAddJob(ARex::JobsList* jobList, ARex::GMJobRef& jobRef, const ARex::GMConfig& config){
+JobGroups::GroupedStatus JobGroups::TryAddJob(ARex::JobsList* jobList, ARex::GMJobRef& jobRef, const ARex::GMConfig& config){
     // Build the groups if not done already
-    JobGroups::buildGroups(config);
+    JobGroups::BuildGroups(config);
 
     std::string dirStrPath = jobRef->SessionDir();
     std::string jobCtrl = ARex::job_control_path(config.ControlDir(), jobRef->get_id(), NULL);
@@ -833,27 +880,31 @@ bool JobGroups::tryAddJob(ARex::JobsList* jobList, ARex::GMJobRef& jobRef, const
     const std::filesystem::path dirPath(dirStrPath);
     fs::directory_iterator dirIter = fs::directory_iterator(fs::directory_entry(dirPath));
     
+    std::string jobId = jobRef->get_id();
+    logger.msg(Arc::DEBUG, "Job to try to group (%s) has status (%s)", jobId, jobRef->get_state_name());
+    
+    // Check if the job has finished completely
+    if (JobGroups::HasJobFinished(jobRef)){
+        logger.msg(Arc::DEBUG, "Job has finished already");
+        return JobGroups::GroupedStatus::FINISHED;
+    };
+
+    // Check if it's in a group that has been sent already
+    if (JobGroups::IsJobSent(jobRef)){
+        if(JobGroups::HasOutput(jobRef)){
+            logger.msg(Arc::VERBOSE, "Job (%s) has finished", jobRef->get_id());
+            ReturnOutputs(jobRef);
+            return JobGroups::GroupedStatus::FINISHING;
+        }
+
+        return JobGroups::GroupedStatus::STORED; // Still needs to wait for the grouped job to finish
+    }
+
     // Check if it is a group job
     logger.msg(Arc::VERBOSE, "Looking for GROUPED file in %s", dirStrPath);
     if (IsGroupedInGrami(jobCtrl)){
         logger.msg(Arc::VERBOSE, "The job is a group, won't try to add it");
-        return false;
-    }
-
-    std::string jobId = jobRef->get_id();
-
-    // Check if it's in a group that has been sent already
-    std::string groupId = JobGroups::CheckSentBy(jobId);
-
-    if (groupId != ""){
-        bool hasOutptus = JobGroups::HasOutput(jobId, groupId);
-        
-        if(hasOutptus){
-            ReturnOutputs(jobId, groupId);
-            return false; // Should continue its processing
-        }
-
-        return true; // Still needs to wait for the grouped job to finish
+        return JobGroups::GroupedStatus::NOT_PROCESSED;
     }
 
     // Try to add the job onto a group
@@ -868,41 +919,107 @@ bool JobGroups::tryAddJob(ARex::JobsList* jobList, ARex::GMJobRef& jobRef, const
         if (status == JobGroup::GroupState::READY){
             logger.msg(Arc::INFO, "Job group '%s' ready to be sent", iter->first);
             // iter->second->SendGroup(jobList, config);
-            iter->second->SendExec(config);
+            std::string arcJobId = iter->second->SendExec(config);
+
+            sentJobs_lock.lock();
             for (GroupedJob job : *iter->second) {
-                logger.msg(Arc::DEBUG, "Storing sent info [%s]->(%s)", iter->second->getId(),job.id);
-                JobGroups::sentJobsToGroupId[job.id] = iter->second->getId();
-            } 
+                logger.msg(Arc::DEBUG, "Storing sent info [%s]->(%s)", job.id, arcJobId);
+                JobGroups::sentJobsToGroupId[job.id] = arcJobId;
+            }
+            sentJobs_lock.unlock();
+
             iter->second->Reset();
         }
         else if (status == JobGroup::GroupState::STORED){
             logger.msg(Arc::DEBUG, "The job stored in a group given by '%s'", iter->first);
         }
 
-        return true;
+        return JobGroups::GroupedStatus::STORED;
     }
 
     logger.msg(Arc::VERBOSE, "No valid groups to store the job at");
-    return false;
+    return JobGroups::GroupedStatus::NOT_PROCESSED;
 };
 
-std::string JobGroups::CheckSentBy(const std::string jobId){
+bool JobGroups::IsJobSent(const ARex::GMJobRef& jobRef){
     try{
-        std::string groupId = JobGroups::sentJobsToGroupId.at(jobId);
-        logger.msg(Arc::INFO, "Job (%s) has been sent by group (%s)", jobId, groupId);
-        return groupId;
+        std::string groupId = JobGroups::sentJobsToGroupId.at(jobRef->get_id());
+        logger.msg(Arc::INFO, "Job (%s) has been sent by group (%s)", jobRef->get_id(), groupId);
+        return true;
     }
     catch (std::out_of_range e){} // Not sent
-    return "";
-};
-
-bool JobGroups::HasOutput(const std::string jobId, const std::string groupId){
     return false;
 };
 
-void JobGroups::ReturnOutputs(const std::string jobId, const std::string groupId){
-    JobGroups::sentJobsToGroupId.erase(jobId);
-}
+bool JobGroups::HasOutput(const ARex::GMJobRef& jobRef){
+    std::string groupId = JobGroups::sentJobsToGroupId[jobRef->get_id()];
+
+    fs::path jobStdOut = fs::path(jobRef->SessionDir())
+                            .parent_path()
+                            .append(groupId)
+                            .append(jobRef->get_id())
+                            .append("DONE");
+
+    return fs::exists(jobStdOut);
+};
+
+void JobGroups::ReturnOutputs(const ARex::GMJobRef& jobRef){
+    static const std::string invalidFiles[2] = {"env", "DONE"};
+
+    std::string groupId = JobGroups::sentJobsToGroupId[jobRef->get_id()];
+
+    fs::path jobGroupDir = fs::path(jobRef->SessionDir())
+                            .parent_path()
+                            .append(groupId)
+                            .append(jobRef->get_id());
+
+    fs::path jobSessionDir = fs::path(jobRef->SessionDir());
+    
+    logger.msg(Arc::DEBUG, "Cleaning base dir");
+    for (fs::directory_entry entry : fs::directory_iterator(jobSessionDir))
+        std::remove(entry.path().c_str());
+
+    logger.msg(Arc::DEBUG, "Moving Outputs");
+    for (fs::directory_entry entry : fs::directory_iterator(jobGroupDir)){
+        std::string filename = entry.path().filename().generic_string();
+
+        if (invalidFiles->find(filename) != std::string::npos)
+            continue;
+        
+        fs::rename(entry.path(), fs::path(jobSessionDir).append(filename));
+    };
+    
+    logger.msg(Arc::DEBUG, "Storing finished job");
+
+    JobGroups::sentJobs_lock.lock();
+    JobGroups::sentJobsToGroupId.erase(jobRef->get_id());
+    JobGroups::sentJobs_lock.unlock();
+
+    JobGroups::SaveFinishedJob(jobRef);
+};
+
+void JobGroups::SaveFinishedJob(const ARex::GMJobRef& jobRef){
+    JobGroups::finishedJobs_lock.lock();
+    
+    JobGroups::finishedJobs.push_front(jobRef->get_id());
+    if (JobGroups::finishedJobs.size() > JobGroups::MAX_STORED_FINISHED_JOBS)
+        JobGroups::finishedJobs.pop_back();
+
+    JobGroups::finishedJobs_lock.unlock();
+};
+
+bool JobGroups::HasJobFinished(const ARex::GMJobRef& jobRef){
+    JobGroups::finishedJobs_lock.lock();
+
+    for (std::string _jobId : JobGroups::finishedJobs)
+        if(_jobId == jobRef->get_id()){
+            finishedJobs_lock.unlock();
+            return true;
+        }
+
+    JobGroups::finishedJobs_lock.unlock();
+    return false;    
+};
 
 }
 

@@ -4,6 +4,7 @@
 #include <ctime>
 #include <map>
 #include <list>
+#include <mutex>
 #include <strings.h>
 #include <filesystem>
 
@@ -74,7 +75,6 @@ public:
     std::list<std::string> envs;
 
     bool inputsMoved;
-    bool requirementsProcessed;
 
     // From GMJobRef
     std::string id;
@@ -84,18 +84,17 @@ public:
     std::string stdout_;
     std::string stderr_;
 
-
     GroupedJob(ARex::GMJobRef& jobRef, const std::string jobControlDir) :
         id(jobRef->get_id()),
         jld(*jobRef->GetLocalDescription()),
         user(jobRef->get_user()),
         controlDir(fs::path(jobControlDir)), 
         workDir(jobRef->SessionDir()),
-        inputsMoved(false),
-        requirementsProcessed(false)
-        {};
+        inputsMoved(false)
+        {this->ProcessGrami();};
 
     bool AreInputsReady();
+    void ProcessGrami();
     void MoveInputs(const std::string& newLocation, bool copyInstread=true);
 
     bool operator==(GroupedJob other){ return id == other.id; }
@@ -128,7 +127,7 @@ private:
 
 public:
     void SendGroup(ARex::JobsList* jobs, const ARex::GMConfig& config);
-    void SendExec(const ARex::GMConfig& config);
+    std::string SendExec(const ARex::GMConfig& config);
 
     GroupState addToGroup(ARex::GMJobRef& jobRef, const std::string controlDir);
 
@@ -143,17 +142,32 @@ class JobGroups {
     friend ARex::GMJob;
     friend JobGroup;
 
+public:
+    enum class GroupedStatus{
+        NOT_PROCESSED, STORED, FINISHED, FINISHING
+    };
+
 private:
+    static const int MAX_STORED_FINISHED_JOBS = 1024;
+
     static std::map<std::string, std::unique_ptr<JobGroup>> groups;
     static std::map<std::string, std::string> sentJobsToGroupId;
+    static std::list<std::string> finishedJobs;
 
-    static void buildGroups(const ARex::GMConfig& config);
-    static std::string CheckSentBy(const std::string jobId);
-    static bool HasOutput(const std::string jobId, const std::string groupId);
-    static void ReturnOutputs(const std::string jobId, const std::string groupId);
+    static std::mutex sentJobs_lock;
+    static std::mutex finishedJobs_lock;
+
+    static void BuildGroups(const ARex::GMConfig& config);
+
+    static bool IsJobSent(const ARex::GMJobRef& jobRef);
+    static bool HasOutput(const ARex::GMJobRef& jobRef);
+    static bool HasJobFinished(const ARex::GMJobRef& jobRef);
+
+    static void ReturnOutputs(const ARex::GMJobRef& jobRef);
+    static void SaveFinishedJob(const ARex::GMJobRef& jobRef);
 
 public:
-    static bool tryAddJob(ARex::JobsList* jobList, ARex::GMJobRef& jobRef, const ARex::GMConfig& config);
+    static GroupedStatus TryAddJob(ARex::JobsList* jobList, ARex::GMJobRef& jobRef, const ARex::GMConfig& config);
 };
 
 

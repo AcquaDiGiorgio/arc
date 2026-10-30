@@ -18,9 +18,11 @@ apt-transport-https \
 dpkg-dev \
 git \
 vim \
+curl \
+inotify-tools \
 # arc dev requirements
 libldap2-dev \
-libsasl2-dev \ 
+libsasl2-dev \
 libtool-bin \
 pkg-config \
 m4 \
@@ -29,9 +31,8 @@ debconf-utils \
 debhelper \
 dh-make \
 dh-python \
-libglibmm-2.4-dev
-
-RUN apt-get install -y nordugrid-arc-dev curl
+libglibmm-2.4-dev \
+nordugrid-arc-dev
 
 WORKDIR /arc
 

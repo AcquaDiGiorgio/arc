@@ -21,7 +21,7 @@ run_task() {
     echo "[${task_id}] Executing task"
 
     # 'set -e' inside the job execution to obtain the real exit status in case of failure
-    bash -e ${exe} $ARGS 1> ${group_id}.out 2> ${group_id}.err
+    bash -e ${exe} $ARGS 1> $STDOUT 2> $STDERR
 
     task_status=$?
 
@@ -29,11 +29,7 @@ run_task() {
     echo "[${task_id}] Task Finished"
     echo "[${task_id}] Process final status: ${task_status}"
 
-    # if [ $task_status = 0 ]; then
-    #     echo "$task_id\n" >> "$base_dir/std.out"
-    # else
-    #     echo "$task_id\n" >> "$base_dir/std.err"
-    # fi
+    touch DONE
 }
 
 # Init group environment (configuration)
