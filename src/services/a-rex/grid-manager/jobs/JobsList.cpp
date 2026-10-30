@@ -1,3 +1,4 @@
+#include "JobGroup.h"
 #ifdef HAVE_CONFIG_H
 #include <config.h>
 #endif
@@ -208,10 +209,20 @@ bool JobsList::AddJob(const JobId &id,uid_t uid,gid_t gid,job_state_t state,cons
     jobs[id] = i;
 
     // If the job can be added, group it and drop the base job
-    if(IFIC::JobGroups::tryAddJob(this, i, config))
-      DropJob(i, state, false);
-    else
+    IFIC::JobGroups::GroupedStatus status = IFIC::JobGroups::TryAddJob(this, i, config);
+
+    if (status == IFIC::JobGroups::GroupedStatus::STORED){
+        DropJob(i, state, false);
+    }
+    else{ // FINISHING, FINISHED, NOT_PROCESSED
+      if (status == IFIC::JobGroups::GroupedStatus::FINISHING){
+        SetJobState(i, job_state_t::JOB_STATE_FINISHING);
+      }
+      else if(status == IFIC::JobGroups::GroupedStatus::FINISHED){
+        SetJobState(i, job_state_t::JOB_STATE_FINISHED);
+      }
       RequestAttention(i);
+    }
   }
   return true;
 }
