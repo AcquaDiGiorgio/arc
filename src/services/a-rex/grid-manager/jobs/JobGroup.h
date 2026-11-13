@@ -2,8 +2,10 @@
 #define __GROUPING_GM_JOB_GROUP_H__
 
 #include <ctime>
+#include <exception>
 #include <map>
 #include <list>
+#include <memory>
 #include <mutex>
 #include <strings.h>
 #include <filesystem>
@@ -45,7 +47,7 @@ public:
     JLDChecker(const std::string _by, const std::string _condition, const std::string _check_value): 
         by(_by), condition(_condition), check_value(_check_value) {};
 
-    bool isValid(const ARex::JobLocalDescription& jobRef);
+    bool isValid(const ARex::JobLocalDescription& jobRef) const;
 
     bool operator=(JLDChecker& jld){
         return (
@@ -84,7 +86,7 @@ public:
     std::string stdout_;
     std::string stderr_;
 
-    GroupedJob(ARex::GMJobRef& jobRef, const std::string jobControlDir) :
+    GroupedJob(ARex::GMJobRef& jobRef, const std::string jobControlDir):
         id(jobRef->get_id()),
         jld(*jobRef->GetLocalDescription()),
         user(jobRef->get_user()),
@@ -97,50 +99,84 @@ public:
     void ProcessGrami();
     void MoveInputs(const std::string& newLocation, bool copyInstread=true);
 
-    bool operator==(GroupedJob other){ return id == other.id; }
+    bool operator==(GroupedJob& other){ return id == other.id; }
 };
 
 class JobGroup : public std::list<GroupedJob> {
 public:
     enum class GroupState{
-        STORED, FAILED, READY
+        STORING, READY, SENT, FINISHED
     };
 
 private:
     ARex::JobId id;
 
-    std::string name;
-    int max_jobs;
-    long max_seconds;
+    ARex::JobId arcId;
+
     std::chrono::steady_clock::time_point firstJobTime{};
-
-    std::string senderDn;
-    std::string senderPEMLocation;
-
-    JLDChecker checker;
+    
+    std::string delegId;
 
     fs::path basePath;
     fs::path inputPath;
 
-    ARex::GMJob buildGrouppedJob(void);
-    void PrepareConfigFile(void);
+    GroupState state;
+
+    int outputsMoved = 0;
+
+    const int maxSize;
 
 public:
     void SendGroup(ARex::JobsList* jobs, const ARex::GMConfig& config);
-    std::string SendExec(const ARex::GMConfig& config);
+    void SendExec();
 
-    GroupState addToGroup(ARex::GMJobRef& jobRef, const std::string controlDir);
+    void AddToGroup(ARex::GMJobRef& jobRef, const std::string controlDir);
 
-    JobGroup(const std::string name, const IFIC::GroupConfig config);
+    JobGroup(std::string deleg_id, int max_size);
 
-    ARex::JobId getId(){return id;};
+    const ARex::JobId getId() const {return this->id;};
+    const GroupState getState() const {return this->state;}
 
-    void Reset();
+    bool HasJobFinished(ARex::GMJobRef& jobRef);
+    void ReturnJobOutput(ARex::GMJobRef& jobRef);
+
+    long GetTimeElapsed();
+    bool CheckInputsReady();
+
+    void SetReady();
+
+private:
+    ARex::GMJob buildGrouppedJob(void);
+    void PrepareConfigFile(void);
+};
+
+class JobGroupDef {
+public:
+    const std::string name;   
+    const int maxJobs;
+    const long maxSeconds;
+
+    const std::string senderDn;
+    const std::string senderPEMLocation;
+
+    const JLDChecker checker;
+
+private:
+    std::list<JobGroup> groups;
+
+public:
+    JobGroupDef(const std::string& name, const IFIC::GroupConfig& groupConfig, const ARex::GMConfig& arexConfig);
+
+    JobGroup* AddToGroupDef(ARex::GMJobRef& jobRef, const ARex::GMConfig& config);
+    
+private:
+    JobGroup* CreateNewGroup(const ARex::GMConfig& config);
 };
 
 class JobGroups {
     friend ARex::GMJob;
     friend JobGroup;
+    friend JobGroupDef;
 
 public:
     enum class GroupedStatus{
@@ -150,22 +186,15 @@ public:
 private:
     static const int MAX_STORED_FINISHED_JOBS = 1024;
 
-    static std::map<std::string, std::unique_ptr<JobGroup>> groups;
-    static std::map<std::string, std::string> sentJobsToGroupId;
-    static std::list<std::string> finishedJobs;
+    static std::list<JobGroupDef> groupsInfo;
+    static std::map<ARex::JobId, JobGroup*> jobToGroup; 
 
-    static std::mutex sentJobs_lock;
-    static std::mutex finishedJobs_lock;
+    static std::map<std::string, JobGroupDef*> groups;
 
     static void BuildGroups(const ARex::GMConfig& config);
-
-    static bool IsJobSent(const ARex::GMJobRef& jobRef);
-    static bool HasOutput(const ARex::GMJobRef& jobRef);
-    static bool HasJobFinished(const ARex::GMJobRef& jobRef);
-
-    static void ReturnOutputs(const ARex::GMJobRef& jobRef);
-    static void SaveFinishedJob(const ARex::GMJobRef& jobRef);
-
+    static void ReportDeletion(ARex::JobId jobId);
+    static JobGroup* GetGroupOfJob(ARex::GMJobRef& jobRef);
+    
 public:
     static GroupedStatus TryAddJob(ARex::JobsList* jobList, ARex::GMJobRef& jobRef, const ARex::GMConfig& config);
 };

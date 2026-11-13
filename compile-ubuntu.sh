@@ -5,8 +5,6 @@ set +x -e
 export DEBIAN_FRONTEND=noninteractive
 export DEBCONF_NONINTERACTIVE_SEEN=true
 
-echo 7.1.2 > VERSION
-
 echo !!!! SETUP
 
 # wget -O /tmp/DEB-GPG-KEY-nordugrid-7.asc  http://download.nordugrid.org/DEB-GPG-KEY-nordugrid-7.asc
@@ -24,31 +22,16 @@ EOF
 
 debconf-set-selections /tmp/slapd.preseed
 
-# echo !!!! AUTOGEN
-
-# ./autogen.sh
-
-# mkdir build 
-# cd build
-
-# echo !!!! CONFIGURE
-
-# ../configure
-
-# echo !!!! MAKE
-
-# make dist
-
 cd build
-mv nordugrid-arc-7.1.2.tar.gz nordugrid-arc_7.1.2.orig.tar.gz
-tar -z -x -f nordugrid-arc_7.1.2.orig.tar.gz
+mv nordugrid-arc-$ARC_VERSION.tar.gz nordugrid-arc_$ARC_VERSION.orig.tar.gz
+tar -z -x -f nordugrid-arc_$ARC_VERSION.orig.tar.gz
 
-cd nordugrid-arc-7.1.2
+cd nordugrid-arc-$TAR_VERSION
 
 echo !!!! BUILDPACKAGE
 
 dpkg-buildpackage -S -us -uc -d
-apt-get build-dep ../nordugrid-arc_7.1.2-1.dsc -y
+apt-get build-dep ../nordugrid-arc_$ARC_VERSION-1.dsc -y
 dpkg-buildpackage -b -us -uc
 
 echo !!!! APTGET

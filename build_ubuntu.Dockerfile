@@ -1,7 +1,6 @@
-
 FROM ubuntu:22.04
 
-RUN apt-get update -y
+RUN apt-get update -y  --fix-missing
 RUN apt-get install -y \
 build-essential \
 apt-utils \
@@ -45,6 +44,9 @@ RUN chmod u+x ./compile.sh
 RUN chmod u+x ./configure.sh
 RUN chmod u+x ./run_group.sh
 
-COPY ./build/nordugrid-arc-7.1.2.tar.gz /arc/build/nordugrid-arc-7.1.2.tar.gz
+ENV TAR_VERSION=7.1.2IFIC
+ENV ARC_VERSION=7.1.2~IFIC
+
+COPY ./build/nordugrid-arc-${TAR_VERSION}.tar.gz /arc/build/nordugrid-arc-${ARC_VERSION}.tar.gz
 RUN ./compile.sh
 # RUN ./configure.sh
