@@ -180,7 +180,7 @@ class JobGroups {
 
 public:
     enum class GroupedStatus{
-        NOT_PROCESSED, STORED, FINISHED, FINISHING
+        NOT_PROCESSED, STORED, FINISHING
     };
 
 private:

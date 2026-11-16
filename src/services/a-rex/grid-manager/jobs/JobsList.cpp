@@ -215,12 +215,9 @@ bool JobsList::AddJob(const JobId &id,uid_t uid,gid_t gid,job_state_t state,cons
         DropJob(i, state, false);
     }
     else{ // FINISHING, FINISHED, NOT_PROCESSED
-      if (status == IFIC::JobGroups::GroupedStatus::FINISHING){
+      if (status == IFIC::JobGroups::GroupedStatus::FINISHING)
         SetJobState(i, job_state_t::JOB_STATE_FINISHING);
-      }
-      else if(status == IFIC::JobGroups::GroupedStatus::FINISHED){
-        SetJobState(i, job_state_t::JOB_STATE_FINISHED);
-      }
+
       RequestAttention(i);
     }
   }
