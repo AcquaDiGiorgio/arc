@@ -44,8 +44,8 @@ RUN chmod u+x ./compile.sh
 RUN chmod u+x ./configure.sh
 RUN chmod u+x ./run_group.sh
 
-ENV TAR_VERSION=7.1.2IFIC
-ENV ARC_VERSION=7.1.2~IFIC
+ENV TAR_VERSION=7.2.0IFIC
+ENV ARC_VERSION=7.2.0~IFIC
 
 COPY ./build/nordugrid-arc-${TAR_VERSION}.tar.gz /arc/build/nordugrid-arc-${ARC_VERSION}.tar.gz
 RUN ./compile.sh

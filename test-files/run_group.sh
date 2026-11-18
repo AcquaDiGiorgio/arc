@@ -29,7 +29,10 @@ run_task() {
     echo "[${task_id}] Task Finished"
     echo "[${task_id}] Process final status: ${task_status}"
 
-    touch DONE
+    echo $task_status > DONE
+
+    # rm env
+    # echo $(pwd) > $JOB_FIFO
 }
 
 # Init group environment (configuration)

@@ -2,11 +2,8 @@
 #define __GROUPING_GM_JOB_GROUP_H__
 
 #include <ctime>
-#include <exception>
 #include <map>
 #include <list>
-#include <memory>
-#include <mutex>
 #include <strings.h>
 #include <filesystem>
 
@@ -68,6 +65,10 @@ public:
 
 class GroupedJob {
 public:
+    enum Status {
+        New, Complete, 
+    };
+
     fs::path controlDir;
     fs::path workDir;
 
@@ -124,7 +125,8 @@ private:
 
     int outputsMoved = 0;
 
-    const int maxSize;
+    const unsigned int maxSize;
+    const unsigned int maxSeconds;
 
 public:
     void SendGroup(ARex::JobsList* jobs, const ARex::GMConfig& config);
@@ -132,7 +134,7 @@ public:
 
     void AddToGroup(ARex::GMJobRef& jobRef, const std::string controlDir);
 
-    JobGroup(std::string deleg_id, int max_size);
+    JobGroup(std::string deleg_id, unsigned int max_size, unsigned int max_seconds);
 
     const ARex::JobId getId() const {return this->id;};
     const GroupState getState() const {return this->state;}
@@ -143,7 +145,11 @@ public:
     long GetTimeElapsed();
     bool CheckInputsReady();
 
+    void CheckReadiness();
     void SetReady();
+    
+    void GetLRMSResult(const ARex::GMConfig& config, ARex::GMJobRef jobRef);
+    std::list<ARex::GMJobRef> GetJobRefs();
 
 private:
     ARex::GMJob buildGrouppedJob(void);
@@ -153,8 +159,8 @@ private:
 class JobGroupDef {
 public:
     const std::string name;   
-    const int maxJobs;
-    const long maxSeconds;
+    const unsigned int maxJobs;
+    const unsigned int maxSeconds;
 
     const std::string senderDn;
     const std::string senderPEMLocation;

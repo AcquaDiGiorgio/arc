@@ -209,15 +209,18 @@ bool JobsList::AddJob(const JobId &id,uid_t uid,gid_t gid,job_state_t state,cons
     jobs[id] = i;
 
     // If the job can be added, group it and drop the base job
+    // IFIC::JobGroups::TryAddJob(this, i, config);
+    // RequestAttention(i);
+
     IFIC::JobGroups::GroupedStatus status = IFIC::JobGroups::TryAddJob(this, i, config);
 
     if (status == IFIC::JobGroups::GroupedStatus::STORED){
-        DropJob(i, state, false);
+      DropJob(i, state, false);
     }
-    else{ // FINISHING, FINISHED, NOT_PROCESSED
+    else{
       if (status == IFIC::JobGroups::GroupedStatus::FINISHING)
         SetJobState(i, job_state_t::JOB_STATE_FINISHING);
-
+      
       RequestAttention(i);
     }
   }
