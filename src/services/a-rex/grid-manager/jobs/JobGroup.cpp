@@ -316,6 +316,23 @@ std::map<std::string, std::list<std::string>> ParseGrami(const ARex::GMConfig co
     return optionsMap;
 };
 
+template<typename T>
+bool isIn(T item, std::list<T> _list) {
+    for (T it : _list){
+        if (item == it)
+            return true;
+    }
+    return false;
+};
+
+template<typename T, typename K>
+bool isIn(K item, std::list<T> _list, const K& (* checker)(T)) {
+    for(T it : _list){
+        if (checker(it) == item)
+            return true;
+    }
+    return false;
+}
 //
 // JLDChecker
 //
@@ -361,13 +378,8 @@ bool GroupedJob::AreInputsReady(){
         }
     }
 
-    size_t filesSize = files.size();
-    size_t reqInputsSize = this->requiredInputNames.size();
-
-    if (reqInputsSize != filesSize){
-        logger.msg(Arc::DEBUG, "Not all inputs downloaded: %d/%d", (int)filesSize, (int)reqInputsSize);
+    if (files.size() < this->requiredInputNames.size())
         return false;
-    }
 
     for (std::string reqInput : this->requiredInputNames){
         bool found = false;
@@ -464,16 +476,88 @@ void GroupedJob::ProcessGrami(){
     logger.msg(Arc::DEBUG, "Stderr: %s", this->stderr_);
 };
 
-void GroupedJob::MoveInputs(const std::string& newDir, bool copyInstead){
-    if(this->inputsMoved)
+void GroupedJob::CreateEnv(const std::string& newDir){
+    logger.msg(Arc::DEBUG, "Creating environment");
+
+    std::string suffix = "_" + this->id;
+    std::string config;
+
+    for (std::string env : this->envs)
+        config += env + "\n";
+
+    std::list<std::string>& execs = this->exec;
+    if(execs.size() > 1){
+        auto execIter = this->exec.begin();
+        execIter++; // Do not look the first value (executable)
+
+        config += "ARGS=\"";
+        for( ; execIter != execs.end() ; ++execIter){
+            config += *execIter + " ";
+        }
+        config.pop_back();
+        config += "\"\n";
+    }
+
+    config += "STDOUT=" + this->stdout_ + "\n";
+    config += "STDERR=" + this->stderr_ + "\n";
+    config += "JOB_FIFO=" + this->pipeLocation;
+
+    logger.msg(Arc::DEBUG, "ENV:\n%s", config);
+    
+    std::ofstream envFile(fs::path(newDir).append("env" + suffix));
+    envFile << config;
+    envFile.close();
+}
+
+void GroupedJob::ModifyExec(){
+    if (this->execModified)
         return;
 
-    bool inputsFailed = false;
+    logger.msg(Arc::DEBUG, "Modifying exec");
+
+    std::string exec = this->exec.front(); // We only need $0
+    logger.msg(Arc::DEBUG, "Found exec: %s", exec);
+
+    fs::path execLocation = fs::path(workDir).append(exec);
+    logger.msg(Arc::DEBUG, "Cleaning %s", execLocation);
+
+    // TODO: Remove magic location
+    std::ifstream newExec("/arc/fake_exec.sh");
+    std::ofstream oldExec(execLocation);
+
+    fs::resize_file(execLocation, 0);
+
+    oldExec << newExec.rdbuf();
+
+    this->execModified = true;
+};
+
+void GroupedJob::TryCopyInputs(const std::string& newDir){
+    if(this->areInputsMoved)
+        return;
+
+    std::list<std::string> files;
+
+    for (auto entry : fs::directory_iterator(this->workDir)){
+        if (entry.is_regular_file()){
+            std::string input = entry.path().filename().generic_string();
+            
+            if (isIn(input, this->movedInputsList))
+                continue;
+
+            if (!isIn(input, this->requiredInputNames))
+                continue;
+
+            logger.msg(Arc::DEBUG, "Found %s", input);
+            files.push_front(input);
+        }
+    }
+
     std::string suffix = "_" + this->id;
 
     logger.msg(Arc::DEBUG, "Moving inputs of job %s", this->id);
 
-    for(const std::string& input : this->requiredInputNames){
+    for(const std::string& input : files){
         std::error_code ec;
 
         logger.msg(Arc::DEBUG, "Moving input '%s'", input);
@@ -484,49 +568,17 @@ void GroupedJob::MoveInputs(const std::string& newDir, bool copyInstead){
 
         logger.msg(Arc::DEBUG, "Moving/Copying file '%s' to '%s'", inputPath.generic_string(), newDir);
 
-        if(copyInstead)
-            fs::copy_file(inputPath, newLocation, ec);
-        else
-            fs::rename(inputPath, newLocation, ec);
+        fs::copy_file(inputPath, newLocation, ec);
 
         if (ec.value() != 0){
             logger.msg(Arc::FATAL, "Failed to move the inputs: EC(%d)", ec.value());
-            inputsFailed = true;
-        }
-    }
-
-    this->inputsMoved = ! inputsFailed;
-
-    if (this->inputsMoved){
-        logger.msg(Arc::DEBUG, "Creating environment");
-        // Create env file for the job
-        std::string config;
-
-        for (std::string env : this->envs)
-            config += env + "\n";
-
-        std::list<std::string>& execs = this->jld.exec;
-        if(execs.size() > 1){
-            auto execIter = this->jld.exec.begin();
-            execIter++; // Do not look the first value (executable)
-
-            config += "ARGS=\"";
-            for( ; execIter != execs.end() ; ++execIter){
-                config += *execIter + " ";
-            }
-            config.pop_back();
-            config += "\"\n";
         }
 
-        config += "STDOUT=" + stdout_ + "\n";
-        config += "STDERR=" + stderr_ + "\n";
-
-        logger.msg(Arc::DEBUG, "ENV:\n%s", config);
-        
-        std::ofstream envFile(fs::path(newDir).append("env" + suffix));
-        envFile << config;
-        envFile.close();
+        this->movedInputsList.push_back(input);
     }
+
+    if(this->movedInputsList.size() == this->requiredInputNames.size())
+        this->areInputsMoved = true;
 };
 
 //
@@ -559,10 +611,10 @@ void IFIC::JobGroup::PrepareConfigFile(){
     for(GroupedJob& job : *this){
         logger.msg(Arc::DEBUG, "Checking JDL of job %s", job.id);
 
-        for (std::string part : job.jld.exec)
+        for (std::string part : job.exec)
             logger.msg(Arc::DEBUG, "JDL exec: %s", part);
 
-        std::string arg0 = job.jld.exec.front();
+        std::string arg0 = job.exec.front();
         group_config += arg0 + "_" + job.id + " ";
     }
 
@@ -577,64 +629,6 @@ void IFIC::JobGroup::PrepareConfigFile(){
     file.close();
 };
 
-bool IFIC::JobGroup::HasJobFinished(ARex::GMJobRef& jobRef){
-    logger.msg(Arc::DEBUG, "[%s] Checking if job (%s) has finished", this->id, jobRef->get_id());
-    
-    if(this->state == GroupState::READY || this->state == GroupState::STORING)
-        return false;
-
-    if(this->state == GroupState::FINISHED)
-        return true;
-
-    fs::path jobStdOut = fs::path(jobRef->SessionDir())
-                            .parent_path()
-                            .append(this->arcId)
-                            .append(jobRef->get_id())
-                            .append("DONE");
-
-    return fs::exists(jobStdOut);
-};
-
-void IFIC::JobGroup::ReturnJobOutput(ARex::GMJobRef& jobRef){
-    if(this->state == GroupState::READY || this->state == GroupState::STORING)
-        return;
-
-    logger.msg(Arc::DEBUG, "[%s] Returning outputs of job (%s)", this->id, jobRef->get_id());
-
-    // Extra files created by the grouping manager
-    static const std::string invalidFiles[2] = {"env", "DONE"};
-
-    fs::path jobGroupDir = fs::path(jobRef->SessionDir())
-                            .parent_path()
-                            .append(this->arcId)
-                            .append(jobRef->get_id());
-
-    fs::path jobSessionDir = fs::path(jobRef->SessionDir());
-        
-    logger.msg(Arc::DEBUG, "Cleaning base dir");
-    for (fs::directory_entry entry : fs::directory_iterator(jobSessionDir))
-        std::remove(entry.path().c_str());
-
-    logger.msg(Arc::DEBUG, "Moving Outputs");
-
-    for (fs::directory_entry entry : fs::directory_iterator(jobGroupDir)){
-        std::string filename = entry.path().filename().generic_string();
-
-        // Do not move unnecesary files
-        if (std::find(std::begin(invalidFiles), std::end(invalidFiles), filename) != std::end(invalidFiles))
-            continue;
-        
-        fs::rename(entry.path(), fs::path(jobSessionDir).append(filename));
-    };
-    
-    logger.msg(Arc::DEBUG, "Storing finished job");
-
-    this->outputsMoved++;
-
-    if (this->outputsMoved == this->size())
-        this->state = GroupState::FINISHED;
-};
-
 void JobGroup::SendExec(){
     // Remove Jobs that has inputs that were not moved
     //  This could occur on job group timeout
@@ -647,11 +641,12 @@ void JobGroup::SendExec(){
         }
         else
             it++;
-    }   
+    }
+
+    for(GroupedJob& job : *this)
+        job.CreateEnv(this->inputPath);
 
     logger.msg(Arc::DEBUG, "Moving inputs of group %s", this->id);
-    for (GroupedJob& job : *this)
-        job.MoveInputs(this->inputPath.generic_string());
 
     logger.msg(Arc::DEBUG, "Preparing to send group %s", this->id);
     
@@ -659,12 +654,7 @@ void JobGroup::SendExec(){
     this->PrepareConfigFile();
 
     logger.msg(Arc::VERBOSE, "Building XLRS");
-
     logger.msg(Arc::DEBUG, "Job Descriptions of Group");
-
-    for (GroupedJob& job : *this)
-        logger.msg(Arc::DEBUG, ParseLocalDescription(&job.jld));
-    
     logger.msg(Arc::DEBUG, "> Building general info");
 
     std::string desc_str =
@@ -676,10 +666,6 @@ void JobGroup::SendExec(){
     // Inputs
     logger.msg(Arc::DEBUG, "> Building input files");
     desc_str += "(inputfiles=\n";
-    for (GroupedJob& job : *this)
-        for(ARex::FileData file : job.jld.inputdata)
-            desc_str += BuildFileDesc(file);
-
     for (auto entry : fs::directory_iterator(this->inputPath)){
         if (entry.is_regular_file()){
             fs::path input = entry.path();
@@ -700,9 +686,6 @@ void JobGroup::SendExec(){
     desc_str += "(outputfiles=\n";
 
     for (GroupedJob& job : *this) {
-        for(ARex::FileData file : job.jld.outputdata)
-            desc_str += BuildFileDesc(file);
-
         for(std::string output : job.outputs)
             desc_str += "(\"/" + job.id + output + "\" \"\")";
     }
@@ -713,7 +696,7 @@ void JobGroup::SendExec(){
     logger.msg(Arc::DEBUG, "> Building final info");
     desc_str += 
         // "(executables=workloadExec.sh)\n" // ?????
-        "(queue=" + this->front().jld.queue + ")\n"
+        "(queue=" + this->front().queue + ")\n"
         "(count=" + std::to_string(this->size()) + ")" // Number of CPU Cores to ask
         "(delegationid=" + this->delegId + ")\n";
 
@@ -786,14 +769,21 @@ void JobGroup::AddToGroup(ARex::GMJobRef& jobRef, const std::string controlDir){
     logger.msg(Arc::DEBUG, "Group '%s' has %d jobs", this->id, this->size());
 
     // Store the Job
-    GroupedJob job(jobRef, controlDir);
+    std::string fifoFilename = jobRef->get_id() + ".control";
+    fs::path jobFifo = fs::path(this->basePath).append(fifoFilename);
+
+    mode_t oldMode = umask(0x000); // Change umask from 0x022 to 0x000 so it can create a pipe with S_IWOTH
+    mkfifo(jobFifo.c_str(), S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IWOTH | S_IROTH);
+    umask(oldMode); // Return the original umask
+
+    GroupedJob job(jobRef, controlDir, jobFifo.generic_string());
 
     logger.msg(Arc::INFO, "Adding job '%s' to '%s'", job.id, this->id);
     this->push_back(job);
 
-    // std::string fifoFilename = job.id + ".control";
-    // fs::path jobFifo = fs::path(this->basePath).append(fifoFilename);
-    // mkfifo(jobFifo.c_str(), S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
+    fs::path jobEnv = fs::path(jobRef->SessionDir()).append("env");
+    std::ofstream envStream(jobEnv);
+    envStream << "JOB_FIFO=" << jobFifo.generic_string();
 
     // Check last timestamp
     if (this->firstJobTime == std::chrono::steady_clock::time_point{})
@@ -820,7 +810,7 @@ bool JobGroup::CheckInputsReady(){
     logger.msg(Arc::DEBUG, "Cheking the status of the inputs of group %s", this->id);
     
     for(GroupedJob& job : *this){
-        inputsReady &= job.AreInputsReady();
+        inputsReady &= job.areInputsMoved;
 
         if (! inputsReady)
             return false;
@@ -839,39 +829,24 @@ void JobGroup::SetReady() {
     this->state = GroupState::READY;
 };
 
-void JobGroup::GetLRMSResult(const ARex::GMConfig& config, ARex::GMJobRef jobRef){
-    std::string jobId = jobRef->get_id();
-
-    fs::path doneFile = fs::path(jobRef->SessionDir())
-                            .parent_path()
-                            .append(this->arcId)
-                            .append(jobId)
-                            .append("DONE");
-
-    std::string lrmsResultFname = ARex::job_control_path(config.ControlDir(), jobId, "lrms_done");
-
-    std::ofstream fLrms(lrmsResultFname.c_str());
-    std::ifstream fDone(doneFile.c_str());
-
-    ARex::LRMSResult res;
-
-    fDone >> res;
-    fLrms << res;
-
-    job_diagnostics_mark_move(*jobRef,config);
+GroupedJob* JobGroup::GetGroupedJob(ARex::GMJobRef jobRef){
+    for (GroupedJob& job : *this)
+        if(jobRef->get_id() == job.id)
+            return &job;
+    
+    return nullptr;
 };
 
-std::list<ARex::GMJobRef> JobGroup::GetJobRefs() {
-    std::list<ARex::GMJobRef> result;
+void JobGroup::TryCopyInputsOfJob(ARex::GMJobRef jobRef){
+    GroupedJob* job = this->GetGroupedJob(jobRef);
 
-    for(GroupedJob job : *this){
-        result.push_back(
-            ARex::GMJobRef(new ARex::GMJob(job.id, job.user)
-        ));
+    if (job == nullptr){
+        logger.msg(Arc::FATAL, "Job '%s' is not in the group '%s'", jobRef->get_id(), this->id);
+        return;
     }
 
-    return result;
-};
+    job->TryCopyInputs(this->inputPath);
+}
 
 //
 // JobGroupDef
@@ -983,54 +958,28 @@ JobGroups::GroupedStatus JobGroups::TryAddJob(ARex::JobsList* jobList, ARex::GMJ
 
     if (group != nullptr){
         logger.msg(Arc::DEBUG, "Job already in a group");
+
+        GroupedJob* grJob = group->GetGroupedJob(jobRef);
+        if (grJob == nullptr)
+            throw std::exception();
+
         // Group is in LRMS / Finished
         if(group->getState() == JobGroup::GroupState::SENT || group->getState() == JobGroup::GroupState::FINISHED){
-            if (group->HasJobFinished(jobRef)){
-                group->ReturnJobOutput(jobRef);
-                group->GetLRMSResult(config, jobRef);
-                
-                GroupedJob* grJobPtr;
-                for(GroupedJob grJob : *group){
-                    if (grJob.id == jobRef->get_id()){
-                        grJobPtr = &grJob;
-                        break;
-                    }
-                }
-
-                if (grJobPtr == NULL)
-                    throw std::bad_exception();
-
-                logger.msg(Arc::DEBUG, "Writting job outputs");
-
-                std::string outputFname = ARex::job_control_path(config.ControlDir(), jobRef->get_id(), ARex::sfx_output);
-                std::ofstream outputStream(outputFname);
-                for (std::string outputName : grJobPtr->outputs){
-                    logger.msg(Arc::DEBUG, "Writting %s", outputName);
-                    outputStream << outputName << "\n";
-                }
-                outputStream << grJobPtr->stdout_ << "\n";
-                outputStream << grJobPtr->stderr_ << "\n";
-
-                outputStream.close();
-
-                logger.msg(Arc::DEBUG, "Job DONE");
-                return JobGroups::GroupedStatus::FINISHING;
-            }
+            
+            grJob->ModifyExec();
+            return JobGroups::GroupedStatus::FINISHING;
         }
-        
-        // Not finished but sent
+
+        group->TryCopyInputsOfJob(jobRef);
+
         if (group->getState() == JobGroup::GroupState::STORING){
             group->CheckReadiness();
+
             if (group->getState() == JobGroup::GroupState::READY){
                 group->SendExec();
-                for(ARex::GMJobRef& job : group->GetJobRefs()){
-                    job_diagnostics_mark_put(*job, config);
-                    job_lrmsoutput_mark_put(*job, config);
-                    job_errors_mark_put(*job, config);
-                }
             }
         }
-        
+
         // Still being processed 
         return JobGroups::GroupedStatus::STORED;
     }
@@ -1046,9 +995,7 @@ JobGroups::GroupedStatus JobGroups::TryAddJob(ARex::JobsList* jobList, ARex::GMJ
             continue; // Try on another group
         }
 
-        std::string cmd = Arc::ArcLocation::GetToolsDir()+"/frontend-info-collector";
-        char const * const args[2] = { cmd.c_str(), NULL };
-        job_controldiag_mark_put(*jobRef,config,args);
+        group->TryCopyInputsOfJob(jobRef);
 
         return JobGroups::GroupedStatus::STORED;
     }

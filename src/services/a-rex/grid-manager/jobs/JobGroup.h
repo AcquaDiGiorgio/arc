@@ -73,32 +73,42 @@ public:
     fs::path workDir;
 
     std::list<std::string> requiredInputNames;
+    std::list<std::string> movedInputsList;
     std::list<std::string> outputs;
     std::list<std::string> RTEs;
     std::list<std::string> envs;
 
-    bool inputsMoved;
+    std::string queue;
+
+    bool areInputsMoved;
+    bool execModified;
 
     // From GMJobRef
     std::string id;
-    ARex::JobLocalDescription jld;
+    // ARex::JobLocalDescription jld;
     Arc::User user;
-
+    std::list<std::string> exec;
     std::string stdout_;
     std::string stderr_;
+    std::string pipeLocation;
 
-    GroupedJob(ARex::GMJobRef& jobRef, const std::string jobControlDir):
+    GroupedJob(ARex::GMJobRef& jobRef, const std::string jobControlDir, std::string pipeLocation):
         id(jobRef->get_id()),
-        jld(*jobRef->GetLocalDescription()),
         user(jobRef->get_user()),
         controlDir(fs::path(jobControlDir)), 
         workDir(jobRef->SessionDir()),
-        inputsMoved(false)
+        areInputsMoved(false),
+        execModified(false),
+        pipeLocation(pipeLocation),
+        queue(jobRef->GetLocalDescription()->queue),
+        exec(jobRef->GetLocalDescription()->exec)
         {this->ProcessGrami();};
 
     bool AreInputsReady();
     void ProcessGrami();
-    void MoveInputs(const std::string& newLocation, bool copyInstread=true);
+    void ModifyExec();
+    void TryCopyInputs(const std::string& newDir);
+    void CreateEnv(const std::string& newDir);
 
     bool operator==(GroupedJob& other){ return id == other.id; }
 };
@@ -139,17 +149,14 @@ public:
     const ARex::JobId getId() const {return this->id;};
     const GroupState getState() const {return this->state;}
 
-    bool HasJobFinished(ARex::GMJobRef& jobRef);
-    void ReturnJobOutput(ARex::GMJobRef& jobRef);
-
     long GetTimeElapsed();
-    bool CheckInputsReady();
 
+    bool CheckInputsReady();
     void CheckReadiness();
     void SetReady();
     
-    void GetLRMSResult(const ARex::GMConfig& config, ARex::GMJobRef jobRef);
-    std::list<ARex::GMJobRef> GetJobRefs();
+    GroupedJob* GetGroupedJob(ARex::GMJobRef jobRef);
+    void TryCopyInputsOfJob(ARex::GMJobRef jobRef);
 
 private:
     ARex::GMJob buildGrouppedJob(void);
