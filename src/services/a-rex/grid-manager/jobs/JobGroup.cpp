@@ -731,7 +731,7 @@ void JobGroup::SendExec(){
             "arcsub", 
             "arcsub",
             "-d", 
-            "FATAL", 
+            "DEBUG", 
             "-C", 
             hostname.c_str(), 
             "-T", 
@@ -756,10 +756,17 @@ void JobGroup::SendExec(){
     // Result should be something like:
     //  Job submitted with jobid: https://{host}/arex/rest/1.0/jobs/{jobid}
     logger.msg(Arc::DEBUG, "Result:\n%s", result);
-    
-    size_type last_slash = result.find_last_of('/');
 
-    this->arcId = result.substr(last_slash+1);
+    std::list results = CheckRegex(result, "Job submitted with jobid: https://[^/]*/arex/rest/1.0/jobs/[1-9a-zA-Z]+");
+    
+    if (results.empty() || results.size() > 1)
+        throw std::exception();
+
+    std::string jobInfo = results.front();
+
+    size_type last_slash = jobInfo.find_last_of('/');
+
+    this->arcId = jobInfo.substr(last_slash+1);
     logger.msg(Arc::DEBUG, "ArcId:%s", this->arcId);
 
     this->state = GroupState::SENT;
