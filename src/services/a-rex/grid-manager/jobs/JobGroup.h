@@ -140,7 +140,7 @@ private:
 
 public:
     void SendGroup(ARex::JobsList* jobs, const ARex::GMConfig& config);
-    void SendExec();
+    void SendExec(const ARex::GMConfig& config);
 
     void AddToGroup(ARex::GMJobRef& jobRef, const std::string controlDir);
 

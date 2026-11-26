@@ -629,7 +629,7 @@ void IFIC::JobGroup::PrepareConfigFile(){
     file.close();
 };
 
-void JobGroup::SendExec(){
+void JobGroup::SendExec(const ARex::GMConfig& config){
     // Remove Jobs that has inputs that were not moved
     //  This could occur on job group timeout
     auto it = this->begin();
@@ -727,13 +727,15 @@ void JobGroup::SendExec(){
 
         std::string hostname = getenv("HOSTNAME");
 
+
+        logger.msg(Arc::DEBUG, "Endopoint: %s", config.AREXEndpoint().c_str());
         execlp(
             "arcsub", 
             "arcsub",
             "-d", 
             "DEBUG", 
             "-C", 
-            hostname.c_str(), 
+            config.AREXEndpoint().c_str(), 
             "-T", 
             "arcrest", 
             "-Q", 
@@ -983,7 +985,7 @@ JobGroups::GroupedStatus JobGroups::TryAddJob(ARex::JobsList* jobList, ARex::GMJ
             group->CheckReadiness();
 
             if (group->getState() == JobGroup::GroupState::READY){
-                group->SendExec();
+                group->SendExec(config);
             }
         }
 
